@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.17;
+
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
+
+contract QualityNFT is ERC721Enumerable, Ownable {
+    using Strings for uint256;
+
+    uint256 public constant MAX_SUPPLY = 3000;
+    uint16 public constant LEGENDARY_COUNT = 100;
+    uint16 public constant RARE_COUNT = 500;
+    uint16 public constant COMMON_COUNT = 2400;
+
+    enum Rarity { Unknown, Common, Rare, Legendary }
+    mapping(uint256 => uint8) private _rarities;
+
+    string private _baseTokenURI;
+    bool public baseURILocked = false;
+
+    event BaseURISet(string newBaseURI);
+    event BaseURILocked();
+    event RaritiesSet(uint256 count);
+    event OwnerMinted(uint256 fromTokenId, uint256 toTokenId);
+
+    constructor(string memory name_, string memory symbol_, string memory baseURI_) ERC721(name_, symbol_) {
+        require(LEGENDARY_COUNT + RARE_COUNT + COMMON_COUNT == MAX_SUPPLY, "Rarity counts must sum to MAX_SUPPLY");
+        _baseTokenURI = baseURI_;
+    }
+
+    function ownerMint(address to, uint256 qty) external onlyOwner {
+        require(qty > 0, "qty>0");
+        require(totalSupply() + qty <= MAX_SUPPLY, "Exceeds max supply");
+        uint256 start = totalSupply() + 1;
+        for (uint256 i = 0; i < qty; i++) {
+            _safeMint(to, start + i);
+        }
+        emit OwnerMinted(start, start + qty - 1);
+    }
+
+    function setRarities(uint256[] calldata tokenIds, uint8[] calldata rarities) external onlyOwner {
+        require(tokenIds.length == rarities.length, "Lengths mismatch");
+        uint256 n = tokenIds.length;
+        for (uint256 i = 0; i < n; i++) {
+            uint256 tid = tokenIds[i];
+            require(tid >= 1 && tid <= MAX_SUPPLY, "tokenId out of range");
+            uint8 r = rarities[i];
+            require(r <= uint8(Rarity.Legendary), "invalid rarity");
+            _rarities[tid] = r;
+        }
+        emit RaritiesSet(n);
+    }
+
+    function rarityOf(uint256 tokenId) public view returns (Rarity) {
+        require(_exists(tokenId), "Nonexistent token");
+        return Rarity(_rarities[tokenId]);
+    }
+
+    function setBaseURI(string calldata baseURI_) external onlyOwner {
+        require(!baseURILocked, "Base URI locked");
+        _baseTokenURI = baseURI_;
+        emit BaseURISet(baseURI_);
+    }
+
+    function lockBaseURI() external onlyOwner {
+        baseURILocked = true;
+        emit BaseURILocked();
+    }
+
+    function _baseURI() internal view override returns (string memory) {
+        return _baseTokenURI;
+    }
+
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        require(_exists(tokenId), "Nonexistent token");
+        string memory base = _baseURI();
+        return bytes(base).length > 0 ? string(abi.encodePacked(base, tokenId.toString(), ".json")) : "";
+    }
+
+    function raritiesCount(Rarity rarity) public view returns (uint256) {
+        uint256 cnt = 0;
+        uint256 s = totalSupply();
+        for (uint256 tid = 1; tid <= s; tid++) {
+            if (_rarities[tid] == uint8(rarity)) cnt++;
+        }
+        return cnt;
+    }
+
+    function withdraw(address payable to) external onlyOwner {
+        uint256 bal = address(this).balance;
+        require(bal > 0, "No balance");
+        to.transfer(bal);
+    }
+
+    receive() external payable {}
+    fallback() external payable {}
+}
